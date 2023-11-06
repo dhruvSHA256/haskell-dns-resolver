@@ -3,15 +3,18 @@
 module Main where
 
 import Data.Binary.Put
--- import Data.Bits (Bits (shiftL))
+import Data.Bits (Bits (shiftL))
 import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as BS
 import Data.ByteString.Conversion (toByteString')
 import Data.List.NonEmpty as NE hiding (length, map)
 import Data.Word
 
--- import System.IO
--- import System.Random
+-- dns packet = dns header 
+--            + dns question 
+--            + dns answer (list of dns record) 
+--            + authority section (list of dns record) 
+--            + additional section (list of dns record)
 
 data DNSHeader = DNSHeader
   { dnsHeaderId :: Word16,
@@ -86,9 +89,9 @@ classIn = 1
 buildQuery :: String -> Word16 -> IO BS.ByteString
 buildQuery domainName recordType = do
   let _id = 69
-      -- recursionDesired = 1 `shiftL` 8
+      recursionDesired = 1 `shiftL` 8
       -- flag is of 2 bytes = 16 bits  = max value 2^17 - 1
-      recursionDesired = 0
+      -- recursionDesired = 0
       -- recursionDesired = (2 ^ 17) -1
       header = DNSHeader _id recursionDesired 1 0 0 0
       question = DNSQuestion (encodeDNSName domainName) recordType classIn
