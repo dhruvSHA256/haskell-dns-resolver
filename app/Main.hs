@@ -10,15 +10,49 @@ import Data.ByteString.Conversion (toByteString')
 import Data.List.NonEmpty as NE hiding (length, map)
 import Data.Word
 
--- dns packet = dns header 
---            + dns question 
---            + dns answer (list of dns record) 
---            + authority section (list of dns record) 
---            + additional section (list of dns record)
+-- dns packet = dns header: 12 bytes fixed
+--            + dns question: variable
+--            + dns answer: variable list of question
+--            + authority section: variable list of dns record
+--            + additional section: variable list of dns record
+--
+-- dns header = id: 2 bytes
+--            + flags: 16 bits or 2 bytes  
+--            + no. of questions: 2 bytes
+--            + no. of answers: 2 bytes
+--            + no. of authorities: 2 bytes
+--            + no. of entry in additional section: 2 bytes
+--
+-- dns question = name: encoded domain name
+--              + type: 16 bit or 2 bytes
+--              + class: 2 bytes
+
+-- dns record = name: byteString
+--            + type: 2 byte int
+--            + class : 2 byte int
+--            + ttl : 4 byte int
+--            + record : 2 byte int
+
+-- dns flag: QR:  1 bit Query Response
+--           OPCODE: 4 bits Operation Code
+--           AA: 1 bit Authoritative Answer
+--           TC: 1 bit Truncated Message
+--           RD: 1 bit Recursion Desired
+--           RA: 1 bit  Recursion Available
+--           Z: 3 bits Reserved
+--           RCODE: 4 bits Response Code
 
 data DNSHeader = DNSHeader
-  { dnsHeaderId :: Word16,
-    dnsHeaderFlags :: Word16,
+  { dnsHeaderId :: Word16, --  a 16 bit word or 2 bytes int
+    dnsHeaderFlags :: Word16, -- QR OPCODE AA TC RD RA Z RCODE
+    -- dnsHeaderFlagQR:: Bool,
+    -- dnsHeaderFlagOPCODE:: Word4,
+    -- dnsHeaderFlagAA:: Bool,
+    -- dnsHeaderFlagTC:: Bool,
+    -- dnsHeaderFlagRD:: Bool,
+    -- dnsHeaderFlagRA:: Bool,
+    -- dnsHeaderFlagZ:: Word4, -- 3 bit
+    -- dnsHeaderFlagRCODE:: Word4,
     dnsHeaderNumQuestion :: Word16,
     dnsHeaderNumAnswer :: Word16,
     dnsHeaderNumAuthority :: Word16,
@@ -35,9 +69,9 @@ data DNSQuestion = DNSQuestion
 
 data DNSRecord = DNSRecord
   { dnsRecordName :: BS.ByteString,
-    dnsRecordType :: Int,
-    dnsRecordClass :: Int,
-    dnsRecordTtl :: Int,
+    dnsRecordType :: Word16,
+    dnsRecordClass :: Word16,
+    dnsRecordTtl :: Word32,
     dnsRecordData :: BS.ByteString
   }
   deriving (Show)
@@ -59,6 +93,14 @@ headerToBytes :: DNSHeader -> BS.ByteString
 headerToBytes header = BS.toStrict $ runPut $ do
   putWord16be (dnsHeaderId header)
   putWord16be (dnsHeaderFlags header)
+  -- putWord16be (dnsHeaderFlagQR header)
+  -- putWord16be (dnsHeaderFlagOPCODE header)
+  -- putWord16be (dnsHeaderFlagAA header)
+  -- putWord16be (dnsHeaderFlagTC header)
+  -- putWord16be (dnsHeaderFlagRD header)
+  -- putWord16be (dnsHeaderFlagRA header)
+  -- putWord16be (dnsHeaderFlagZ header)
+  -- putWord16be (dnsHeaderFlagRCODE header)
   putWord16be (dnsHeaderNumQuestion header)
   putWord16be (dnsHeaderNumAnswer header)
   putWord16be (dnsHeaderNumAuthority header)
@@ -88,7 +130,7 @@ classIn = 1
 
 buildQuery :: String -> Word16 -> IO BS.ByteString
 buildQuery domainName recordType = do
-  let _id = 69
+  let _id = 1
       recursionDesired = 1 `shiftL` 8
       -- flag is of 2 bytes = 16 bits  = max value 2^17 - 1
       -- recursionDesired = 0
