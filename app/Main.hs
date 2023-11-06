@@ -113,4 +113,7 @@ main = do
  header -> 00 45 00 00 00 01 00 00 00 00 00 00 -> 12 bytes
  id = 00 45
  query  -> 03 77 77 77 06 67 6f 6f 67 6c 65 03 63 6f 6d 00 00 01 00 01
+
+ when we try to resolve google.com it is of type A (ipv4) or type AAAA (ipv6)
+ but when we try to resolve www.google.com it is of type CNAME as it doesnt map IP but another DNS record google.com in this case
 -}
