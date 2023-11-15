@@ -122,6 +122,7 @@ encodeDNSName domainName = toByteString' $ mconcat encodedParts <> word8 0
     encodePart :: String -> Builder
     encodePart part = word8 (fromIntegral $ length part) <> stringUtf8 part
 
+-- A record
 typeA :: Word16
 typeA = 1
 
