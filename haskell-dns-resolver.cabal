@@ -68,7 +68,7 @@ executable haskell-dns-resolver
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.16.4.0, network, bytestring, binary, random, bytestring-conversion, text
+    build-depends:    base ^>=4.16.4.0, network, bytestring, binary, random, bytestring-conversion, text, double-conversion
 
     -- Directories containing source files.
     hs-source-dirs:   app

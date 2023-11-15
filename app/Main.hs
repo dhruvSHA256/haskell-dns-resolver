@@ -9,6 +9,12 @@ import qualified Data.ByteString.Char8 as BS
 import Data.ByteString.Conversion (toByteString')
 import Data.List.NonEmpty as NE hiding (length, map)
 import Data.Word
+import Data.Binary.Get
+import Data.Bits (Bits (shiftR, testBit))
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as C
+import qualified Data.List.NonEmpty as NE
+import Data.Word
 
 -- dns packet = dns header: 12 bytes fixed
 --            + dns question: variable
@@ -141,25 +147,80 @@ buildQuery domainName recordType = do
       queryBytes = headerToBytes header <> questionToBytes question
   return queryBytes
 
+
+-- Parsing functions
+getDNSHeader :: Get DNSHeader
+getDNSHeader = DNSHeader <$> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be
+
+getDNSQuestion :: Get DNSQuestion
+getDNSQuestion = DNSQuestion <$> getDomainName <*> getWord16be <*> getWord16be
+
+getDNSRecord :: Get DNSRecord
+getDNSRecord = DNSRecord <$> getDomainName <*> getWord16be <*> getWord16be <*> getWord32be <*> getByteStringLenPrefix
+
+getDNSPacket :: Get DNSPacket
+getDNSPacket = do
+  header <- getDNSHeader
+  questions <- getDNSQuestionNE
+  answers <- getDNSRecordList
+  authorities <- getDNSRecordList
+  additionals <- getDNSRecordList
+  return $ DNSPacket header questions answers authorities additionals
+
+getDNSQuestionNE :: Get (NE.NonEmpty DNSQuestion)
+getDNSQuestionNE = do
+  q <- getDNSQuestion
+  qs <- many getDNSQuestion
+  return $ q NE.:| qs
+
+getDNSRecordList :: Get [DNSRecord]
+getDNSRecordList = do
+  count <- getWord16be
+  replicateM (fromIntegral count) getDNSRecord
+
+getDomainName :: Get BS.ByteString
+getDomainName = do
+  len <- getWord8
+  if len == 0
+    then return ""
+    else do
+      label <- getByteString (fromIntegral len)
+      rest <- getDomainName
+      return $ label <> "." <> rest
+
+getByteStringLenPrefix :: Get BS.ByteString
+getByteStringLenPrefix = do
+  len <- getWord8
+  getByteString (fromIntegral len)
+
+-- Main function to parse a ByteString into a DNSPacket
+parseDNSPacket :: BS.ByteString -> Either String DNSPacket
+parseDNSPacket = runGetOrFail getDNSPacket
+
 main :: IO ()
 main = do
-  q <- buildQuery "www.google.com" typeA
-  BS.putStr q
+  -- q <- buildQuery "www.google.com" typeA
+  -- BS.putStr q
+  -- Replace the ByteString with the actual DNS packet content
+  let examplePacket = "\x00\x01\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01"
+  case parseDNSPacket (C.pack examplePacket) of
+    Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
+    Right dnsPacket -> print dnsPacket
 
-{-
-  in one terminal listen on 1053 as a dns resolver
-  nc -u -l 1053 >! query_packet.txt
-  run dig to send dns packet to localhost
-  dig +retry=0 -4 -p 1053 @127.0.0.1 +noedns +noall +noanswer +noauthority +noadditional google.com
-  run our resolver
-  cabal run > my_query.txt
-  content of query_packet.txt and my_query.txt would be similar except starting packet ID
-  ID is of type word16 so 16 bit unsigned = 2 bytes
+-- {-
+--   in one terminal listen on 1053 as a dns resolver
+--   nc -u -l 1053 >! query_packet.txt
+--   run dig to send dns packet to localhost
+--   dig +retry=0 -4 -p 1053 @127.0.0.1 +noedns +noall +noanswer +noauthority +noadditional google.com
+--   run our resolver
+--   cabal run > my_query.txt
+--   content of query_packet.txt and my_query.txt would be similar except starting packet ID
+--   ID is of type word16 so 16 bit unsigned = 2 bytes
 
- header -> 00 45 00 00 00 01 00 00 00 00 00 00 -> 12 bytes
- id = 00 45
- query  -> 03 77 77 77 06 67 6f 6f 67 6c 65 03 63 6f 6d 00 00 01 00 01
+--  header -> 00 45 00 00 00 01 00 00 00 00 00 00 -> 12 bytes
+--  id = 00 45
+--  query  -> 03 77 77 77 06 67 6f 6f 67 6c 65 03 63 6f 6d 00 00 01 00 01
 
- when we try to resolve google.com it is of type A (ipv4) or type AAAA (ipv6)
- but when we try to resolve www.google.com it is of type CNAME as it doesnt map IP but another DNS record google.com in this case
--}
+--  when we try to resolve google.com it is of type A (ipv4) or type AAAA (ipv6)
+--  but when we try to resolve www.google.com it is of type CNAME as it doesnt map IP but another DNS record google.com in this case
+-- -}
