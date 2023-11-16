@@ -1,19 +1,18 @@
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Main where
 
+import Control.Monad
+import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits (Bits (shiftL))
 import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as BS
-import Data.ByteString.Conversion (toByteString')
-import Data.List.NonEmpty as NE hiding (length, map)
-import Data.Word
-import Data.Binary.Get
-import Data.Bits (Bits (shiftR, testBit))
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
-import qualified Data.List.NonEmpty as NE
+import Data.ByteString.Conversion (toByteString')
+import qualified Data.ByteString.Lazy as LBS
+import Data.List.NonEmpty as NE hiding (length, map)
 import Data.Word
 
 -- dns packet = dns header: 12 bytes fixed
@@ -23,7 +22,7 @@ import Data.Word
 --            + additional section: variable list of dns record
 --
 -- dns header = id: 2 bytes
---            + flags: 16 bits or 2 bytes  
+--            + flags: 16 bits or 2 bytes
 --            + no. of questions: 2 bytes
 --            + no. of answers: 2 bytes
 --            + no. of authorities: 2 bytes
@@ -49,8 +48,8 @@ import Data.Word
 --           RCODE: 4 bits Response Code
 
 data DNSHeader = DNSHeader
-  { dnsHeaderId :: Word16, --  a 16 bit word or 2 bytes int
-    dnsHeaderFlags :: Word16, -- QR OPCODE AA TC RD RA Z RCODE
+  { dnsHeaderId :: Data.Word.Word16, --  a 16 bit word or 2 bytes int
+    dnsHeaderFlags :: Data.Word.Word16, -- QR OPCODE AA TC RD RA Z RCODE
     -- dnsHeaderFlagQR:: Bool,
     -- dnsHeaderFlagOPCODE:: Word4,
     -- dnsHeaderFlagAA:: Bool,
@@ -59,25 +58,25 @@ data DNSHeader = DNSHeader
     -- dnsHeaderFlagRA:: Bool,
     -- dnsHeaderFlagZ:: Word4, -- 3 bit
     -- dnsHeaderFlagRCODE:: Word4,
-    dnsHeaderNumQuestion :: Word16,
-    dnsHeaderNumAnswer :: Word16,
-    dnsHeaderNumAuthority :: Word16,
-    dnsHeaderNumAdditional :: Word16
+    dnsHeaderNumQuestion :: Data.Word.Word16,
+    dnsHeaderNumAnswer :: Data.Word.Word16,
+    dnsHeaderNumAuthority :: Data.Word.Word16,
+    dnsHeaderNumAdditional :: Data.Word.Word16
   }
   deriving (Show)
 
 data DNSQuestion = DNSQuestion
   { dnsQuestionName :: BS.ByteString,
-    dnsQuestionType :: Word16,
-    dnsQuestionClass :: Word16
+    dnsQuestionType :: Data.Word.Word16,
+    dnsQuestionClass :: Data.Word.Word16
   }
   deriving (Show)
 
 data DNSRecord = DNSRecord
   { dnsRecordName :: BS.ByteString,
-    dnsRecordType :: Word16,
-    dnsRecordClass :: Word16,
-    dnsRecordTtl :: Word32,
+    dnsRecordType :: Data.Word.Word16,
+    dnsRecordClass :: Data.Word.Word16,
+    dnsRecordTtl :: Data.Word.Word32,
     dnsRecordData :: BS.ByteString
   }
   deriving (Show)
@@ -129,64 +128,69 @@ encodeDNSName domainName = toByteString' $ mconcat encodedParts <> word8 0
     encodePart part = word8 (fromIntegral $ length part) <> stringUtf8 part
 
 -- A record
-typeA :: Word16
+typeA :: Data.Word.Word16
 typeA = 1
 
-classIn :: Word16
+classIn :: Data.Word.Word16
 classIn = 1
 
-buildQuery :: String -> Word16 -> IO BS.ByteString
+buildQuery :: String -> Data.Word.Word16 -> IO BS.ByteString
 buildQuery domainName recordType = do
   let _id = 1
-      recursionDesired = 1 `shiftL` 8
+      recursionDesired = 1 `Data.Bits.shiftL` 8
       -- flag is of 2 bytes = 16 bits  = max value 2^17 - 1
       -- recursionDesired = 0
       -- recursionDesired = (2 ^ 17) -1
       header = DNSHeader _id recursionDesired 1 0 0 0
       question = DNSQuestion (encodeDNSName domainName) recordType classIn
       queryBytes = headerToBytes header <> questionToBytes question
+  print header
+  print question
   return queryBytes
 
-
--- Parsing functions
-getDNSHeader :: Get DNSHeader
-getDNSHeader = DNSHeader <$> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be
-
-getDNSQuestion :: Get DNSQuestion
-getDNSQuestion = DNSQuestion <$> getDomainName <*> getWord16be <*> getWord16be
-
-getDNSRecord :: Get DNSRecord
-getDNSRecord = DNSRecord <$> getDomainName <*> getWord16be <*> getWord16be <*> getWord32be <*> getByteStringLenPrefix
-
-getDNSPacket :: Get DNSPacket
-getDNSPacket = do
-  header <- getDNSHeader
-  questions <- getDNSQuestionNE
-  answers <- getDNSRecordList
-  authorities <- getDNSRecordList
-  additionals <- getDNSRecordList
-  return $ DNSPacket header questions answers authorities additionals
-
-getDNSQuestionNE :: Get (NE.NonEmpty DNSQuestion)
-getDNSQuestionNE = do
-  q <- getDNSQuestion
-  qs <- many getDNSQuestion
-  return $ q NE.:| qs
-
-getDNSRecordList :: Get [DNSRecord]
-getDNSRecordList = do
-  count <- getWord16be
-  replicateM (fromIntegral count) getDNSRecord
+--------------------------------
 
 getDomainName :: Get BS.ByteString
 getDomainName = do
   len <- getWord8
   if len == 0
-    then return ""
+    then return C.empty
     else do
       label <- getByteString (fromIntegral len)
       rest <- getDomainName
-      return $ label <> "." <> rest
+      return $
+        if BS.null rest
+          then label
+          else label <> C.pack "." <> rest
+
+getDNSHeader :: Get DNSHeader
+getDNSHeader = DNSHeader <$> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be
+
+getDNSQuestionNE :: Word16 -> Get (NonEmpty DNSQuestion)
+getDNSQuestionNE x = do
+  qs <- replicateM (fromIntegral x) getDNSQuestion
+  case qs of
+    [] -> error "No DNS questions read"
+    (y : ys) -> return $ y :| ys
+  where
+    getDNSQuestion :: Get DNSQuestion
+    getDNSQuestion = DNSQuestion <$> getDomainName <*> getWord16be <*> getWord16be
+
+getDNSRecordList :: Word16 -> Get [DNSRecord]
+getDNSRecordList count = do
+  replicateM (fromIntegral count) getDNSRecord
+  where
+    getDNSRecord :: Get DNSRecord
+    getDNSRecord = DNSRecord <$> getDomainName <*> getWord16be <*> getWord16be <*> getWord32be <*> getByteStringLenPrefix
+
+getDNSPacket :: Get DNSPacket
+getDNSPacket = do
+  header <- getDNSHeader
+  questions <- getDNSQuestionNE (dnsHeaderNumQuestion header)
+  answers <- getDNSRecordList (dnsHeaderNumAnswer header)
+  authorities <- getDNSRecordList (dnsHeaderNumAuthority header)
+  additionals <- getDNSRecordList (dnsHeaderNumAdditional header)
+  return $ DNSPacket header questions answers authorities additionals
 
 getByteStringLenPrefix :: Get BS.ByteString
 getByteStringLenPrefix = do
@@ -195,17 +199,31 @@ getByteStringLenPrefix = do
 
 -- Main function to parse a ByteString into a DNSPacket
 parseDNSPacket :: BS.ByteString -> Either String DNSPacket
-parseDNSPacket = runGetOrFail getDNSPacket
+parseDNSPacket bs =
+  case runGetOrFail getDNSPacket (LBS.fromStrict bs) of
+    Left (_, _, err) -> Left err
+    Right (_, _, dnsPacket) -> Right dnsPacket
+
+readByteStringFromFile :: FilePath -> IO BS.ByteString
+readByteStringFromFile filePath = do
+  BS.readFile filePath
 
 main :: IO ()
 main = do
-  -- q <- buildQuery "www.google.com" typeA
-  -- BS.putStr q
+  -- examplePacket <- buildQuery "www.google.com" typeA
+  -- BS.putStr examplePacket
   -- Replace the ByteString with the actual DNS packet content
-  let examplePacket = "\x00\x01\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01"
-  case parseDNSPacket (C.pack examplePacket) of
-    Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
-    Right dnsPacket -> print dnsPacket
+  let filePath = "response_packet.txt"
+  byteString <- readByteStringFromFile filePath
+
+  -- BS.putStrLn byteString
+  -- case parseDNSPacket byteString of
+  --   Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
+  --   Right dnsPacket -> print dnsPacket
+
+  case runGetOrFail getDNSHeader (LBS.fromStrict byteString) of
+    Left (_, _, err) -> print err
+    Right (_, _, dnsPacket) -> print dnsPacket
 
 -- {-
 --   in one terminal listen on 1053 as a dns resolver
