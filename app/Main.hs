@@ -210,11 +210,13 @@ readByteStringFromFile filePath = do
 
 main :: IO ()
 main = do
-  -- examplePacket <- buildQuery "www.google.com" typeA
+  examplePacket <- buildQuery "www.google.com" typeA
   -- BS.putStr examplePacket
   -- Replace the ByteString with the actual DNS packet content
   let filePath = "response_packet.txt"
   byteString <- readByteStringFromFile filePath
+  print $ BS.length examplePacket
+  print $ BS.length byteString
 
   -- BS.putStrLn byteString
   -- case parseDNSPacket byteString of
