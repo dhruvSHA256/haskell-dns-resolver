@@ -6,7 +6,7 @@ module Main where
 import Control.Monad
 import Data.Binary.Get
 import Data.Binary.Put
-import Data.Bits (Bits (shiftL))
+import Data.Bits (Bits (shiftL), (.&.))
 import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Char8 as C
@@ -90,22 +90,11 @@ data DNSPacket = DNSPacket
   }
   deriving (Show)
 
-myHeader :: DNSHeader
-myHeader = DNSHeader 1 2 3 4 5 6
-
 -----------------------------------------------------
 headerToBytes :: DNSHeader -> BS.ByteString
 headerToBytes header = BS.toStrict $ runPut $ do
   putWord16be (dnsHeaderId header)
   putWord16be (dnsHeaderFlags header)
-  -- putWord16be (dnsHeaderFlagQR header)
-  -- putWord16be (dnsHeaderFlagOPCODE header)
-  -- putWord16be (dnsHeaderFlagAA header)
-  -- putWord16be (dnsHeaderFlagTC header)
-  -- putWord16be (dnsHeaderFlagRD header)
-  -- putWord16be (dnsHeaderFlagRA header)
-  -- putWord16be (dnsHeaderFlagZ header)
-  -- putWord16be (dnsHeaderFlagRCODE header)
   putWord16be (dnsHeaderNumQuestion header)
   putWord16be (dnsHeaderNumAnswer header)
   putWord16be (dnsHeaderNumAuthority header)
@@ -134,8 +123,8 @@ typeA = 1
 classIn :: Data.Word.Word16
 classIn = 1
 
-buildQuery :: String -> Data.Word.Word16 -> IO BS.ByteString
-buildQuery domainName recordType = do
+encodeQuery :: String -> Data.Word.Word16 -> IO BS.ByteString
+encodeQuery domainName recordType = do
   let _id = 1
       recursionDesired = 1 `Data.Bits.shiftL` 8
       -- flag is of 2 bytes = 16 bits  = max value 2^17 - 1
@@ -144,24 +133,34 @@ buildQuery domainName recordType = do
       header = DNSHeader _id recursionDesired 1 0 0 0
       question = DNSQuestion (encodeDNSName domainName) recordType classIn
       queryBytes = headerToBytes header <> questionToBytes question
-  print header
-  print question
   return queryBytes
 
 --------------------------------
-
 getDomainName :: Get BS.ByteString
 getDomainName = do
-  len <- getWord8
-  if len == 0
-    then return C.empty
-    else do
-      label <- getByteString (fromIntegral len)
-      rest <- getDomainName
-      return $
-        if BS.null rest
-          then label
-          else label <> C.pack "." <> rest
+  lengthByte <- getWord8
+  if lengthByte == 0
+    then return BS.empty
+    else
+      if lengthByte .&. 0xc0 /= 0
+        then decodeCompressedName lengthByte
+        else do
+          label <- getByteString (fromIntegral lengthByte)
+          rest <- getDomainName
+          return $
+            if BS.null rest
+              then label
+              else label <> C.pack "." <> rest
+
+decodeCompressedName :: Word8 -> Get BS.ByteString
+decodeCompressedName lengthByte = do
+  pointerBytes <- getWord8
+  let pointer = (lengthByte .&. 0x3f) `shiftL` 8 + fromIntegral pointerBytes
+  currentPos <- bytesRead
+  _ <- skip $ fromIntegral pointer
+  result <- getDomainName
+  _ <- skip $ fromIntegral (currentPos - fromIntegral pointer - 2) -- Adjust the current position
+  return result
 
 getDNSHeader :: Get DNSHeader
 getDNSHeader = DNSHeader <$> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be
@@ -198,8 +197,8 @@ getByteStringLenPrefix = do
   getByteString (fromIntegral len)
 
 -- Main function to parse a ByteString into a DNSPacket
-parseDNSPacket :: BS.ByteString -> Either String DNSPacket
-parseDNSPacket bs =
+decodeQuery :: BS.ByteString -> Either String DNSPacket
+decodeQuery bs =
   case runGetOrFail getDNSPacket (LBS.fromStrict bs) of
     Left (_, _, err) -> Left err
     Right (_, _, dnsPacket) -> Right dnsPacket
@@ -210,22 +209,12 @@ readByteStringFromFile filePath = do
 
 main :: IO ()
 main = do
-  examplePacket <- buildQuery "www.google.com" typeA
-  -- BS.putStr examplePacket
-  -- Replace the ByteString with the actual DNS packet content
-  let filePath = "response_packet.txt"
-  byteString <- readByteStringFromFile filePath
-  print $ BS.length examplePacket
+  print "reading from file"
+  byteString <- readByteStringFromFile "request.txt"
   print $ BS.length byteString
-
-  -- BS.putStrLn byteString
-  -- case parseDNSPacket byteString of
-  --   Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
-  --   Right dnsPacket -> print dnsPacket
-
-  case runGetOrFail getDNSHeader (LBS.fromStrict byteString) of
-    Left (_, _, err) -> print err
-    Right (_, _, dnsPacket) -> print dnsPacket
+  case decodeQuery byteString of
+    Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
+    Right dnsPacket -> print dnsPacket
 
 -- {-
 --   in one terminal listen on 1053 as a dns resolver
