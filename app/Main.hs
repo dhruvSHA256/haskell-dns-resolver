@@ -1,3 +1,4 @@
+{-# LANGUAGE BinaryLiterals #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
@@ -6,14 +7,18 @@ module Main where
 import Control.Monad
 import Data.Binary.Get
 import Data.Binary.Put
-import Data.Bits (Bits (shiftL), (.&.))
+import Data.Bits
 import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Char8 as C
 import Data.ByteString.Conversion (toByteString')
 import qualified Data.ByteString.Lazy as LBS
+import Data.Function
 import Data.List.NonEmpty as NE hiding (length, map)
 import Data.Word
+import Debug.Trace
+
+-- t = traceShowM
 
 -- dns packet = dns header: 12 bytes fixed
 --            + dns question: variable
@@ -136,70 +141,81 @@ encodeQuery domainName recordType = do
   return queryBytes
 
 --------------------------------
-getDomainName :: Get BS.ByteString
-getDomainName = do
-  lengthByte <- getWord8
-  if lengthByte == 0
-    then return BS.empty
+
+isPointer :: (Bits a) => a -> Bool
+isPointer c = testBit c 7 && testBit c 6
+
+getDomainName :: BS.ByteString -> Get BS.ByteString
+getDomainName input = do
+  len <- getWord8
+  let lengthValue = len .&. 63
+  if len == 0
+    then do
+      return BS.empty
     else
-      if lengthByte .&. 0xc0 /= 0
-        then decodeCompressedName lengthByte
+      if isPointer len
+        then do
+          decodeCompressedName input lengthValue
         else do
-          label <- getByteString (fromIntegral lengthByte)
-          rest <- getDomainName
+          label <- getByteString $ fromIntegral lengthValue
+          rest <- getDomainName input
           return $
             if BS.null rest
               then label
               else label <> C.pack "." <> rest
 
-decodeCompressedName :: Word8 -> Get BS.ByteString
-decodeCompressedName lengthByte = do
-  pointerBytes <- getWord8
-  let pointer = (lengthByte .&. 0x3f) `shiftL` 8 + fromIntegral pointerBytes
+decodeCompressedName :: BS.ByteString -> Word8 -> Get BS.ByteString
+decodeCompressedName input lengthValue = do
+  pointer' <- getWord8
+  let offset = (lengthValue .&. 0x3f) `shiftL` 8 + fromIntegral pointer'
   currentPos <- bytesRead
-  _ <- skip $ fromIntegral pointer
-  result <- getDomainName
-  _ <- skip $ fromIntegral (currentPos - fromIntegral pointer - 2) -- Adjust the current position
+  traceShowM "pos: "
+  traceShowM currentPos
+  traceShowM "offset: "
+  traceShowM offset
+  traceShowM "lengthValue: "
+  traceShowM lengthValue
+  let result = BS.empty
   return result
 
 getDNSHeader :: Get DNSHeader
 getDNSHeader = DNSHeader <$> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be
 
-getDNSQuestionNE :: Word16 -> Get (NonEmpty DNSQuestion)
-getDNSQuestionNE x = do
+getDNSQuestionNE :: BS.ByteString -> Word16 -> Get (NonEmpty DNSQuestion)
+getDNSQuestionNE input x = do
   qs <- replicateM (fromIntegral x) getDNSQuestion
   case qs of
     [] -> error "No DNS questions read"
     (y : ys) -> return $ y :| ys
   where
     getDNSQuestion :: Get DNSQuestion
-    getDNSQuestion = DNSQuestion <$> getDomainName <*> getWord16be <*> getWord16be
+    getDNSQuestion = DNSQuestion <$> getDomainName input <*> getWord16be <*> getWord16be
 
-getDNSRecordList :: Word16 -> Get [DNSRecord]
-getDNSRecordList count = do
+getDNSRecordList :: BS.ByteString -> Word16 -> Get [DNSRecord]
+getDNSRecordList input count = do
   replicateM (fromIntegral count) getDNSRecord
   where
     getDNSRecord :: Get DNSRecord
-    getDNSRecord = DNSRecord <$> getDomainName <*> getWord16be <*> getWord16be <*> getWord32be <*> getByteStringLenPrefix
+    getDNSRecord = DNSRecord <$> getDomainName input <*> getWord16be <*> getWord16be <*> getWord32be <*> getByteStringLenPrefix
 
-getDNSPacket :: Get DNSPacket
-getDNSPacket = do
+getDNSPacket :: BS.ByteString -> Get DNSPacket
+getDNSPacket input = do
   header <- getDNSHeader
-  questions <- getDNSQuestionNE (dnsHeaderNumQuestion header)
-  answers <- getDNSRecordList (dnsHeaderNumAnswer header)
-  authorities <- getDNSRecordList (dnsHeaderNumAuthority header)
-  additionals <- getDNSRecordList (dnsHeaderNumAdditional header)
+  questions <- getDNSQuestionNE input (dnsHeaderNumQuestion header)
+  answers <- getDNSRecordList input (dnsHeaderNumAnswer header)
+  authorities <- getDNSRecordList input (dnsHeaderNumAuthority header)
+  additionals <- getDNSRecordList input (dnsHeaderNumAdditional header)
   return $ DNSPacket header questions answers authorities additionals
 
 getByteStringLenPrefix :: Get BS.ByteString
 getByteStringLenPrefix = do
-  len <- getWord8
+  len <- getWord16be
   getByteString (fromIntegral len)
 
 -- Main function to parse a ByteString into a DNSPacket
 decodeQuery :: BS.ByteString -> Either String DNSPacket
 decodeQuery bs =
-  case runGetOrFail getDNSPacket (LBS.fromStrict bs) of
+  case runGetOrFail (getDNSPacket bs) (LBS.fromStrict bs) of
     Left (_, _, err) -> Left err
     Right (_, _, dnsPacket) -> Right dnsPacket
 
@@ -209,9 +225,8 @@ readByteStringFromFile filePath = do
 
 main :: IO ()
 main = do
-  print "reading from file"
-  byteString <- readByteStringFromFile "request.txt"
-  print $ BS.length byteString
+  byteString <- readByteStringFromFile "output_file.bin"
+  -- print $ BS.length byteString
   case decodeQuery byteString of
     Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
     Right dnsPacket -> print dnsPacket
