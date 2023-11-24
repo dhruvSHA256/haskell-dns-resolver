@@ -17,6 +17,7 @@ import Data.Function
 import Data.List.NonEmpty as NE hiding (length, map)
 import Data.Word
 import Debug.Trace
+import qualified Foreign.C as BS
 
 -- t = traceShowM
 
@@ -163,20 +164,20 @@ getDomainName input = do
             if BS.null rest
               then label
               else label <> C.pack "." <> rest
+  where
+    decodeCompressedName :: BS.ByteString -> Word8 -> Get BS.ByteString
+    decodeCompressedName input lengthValue = do
+      pointer' <- getWord8
+      let offset = fromIntegral $ (lengthValue .&. 0x3f) `shiftL` 8 + fromIntegral pointer'
+      let result = getDomainAtOffset offset input
+      return result
 
-decodeCompressedName :: BS.ByteString -> Word8 -> Get BS.ByteString
-decodeCompressedName input lengthValue = do
-  pointer' <- getWord8
-  let offset = (lengthValue .&. 0x3f) `shiftL` 8 + fromIntegral pointer'
-  currentPos <- bytesRead
-  traceShowM "pos: "
-  traceShowM currentPos
-  traceShowM "offset: "
-  traceShowM offset
-  traceShowM "lengthValue: "
-  traceShowM lengthValue
-  let result = BS.empty
-  return result
+    getDomainAtOffset :: Int -> BS.ByteString -> BS.ByteString
+    getDomainAtOffset offset bs = do
+      let inp = BS.drop offset bs -- Corrected 'input' to 'bs'
+      case runGetOrFail (getDomainName inp) (LBS.fromStrict inp) of
+        Left (_, _, _) -> BS.empty
+        Right (_, _, domain) -> domain
 
 getDNSHeader :: Get DNSHeader
 getDNSHeader = DNSHeader <$> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be <*> getWord16be
@@ -225,11 +226,12 @@ readByteStringFromFile filePath = do
 
 main :: IO ()
 main = do
-  byteString <- readByteStringFromFile "output_file.bin"
-  -- print $ BS.length byteString
-  case decodeQuery byteString of
-    Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
-    Right dnsPacket -> print dnsPacket
+  BS.putStrLn $ BS.pack "\\"
+
+-- byteString <- readByteStringFromFile "output_file.bin"
+-- case decodeQuery byteString of
+--   Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
+--   Right dnsPacket -> print dnsPacket
 
 -- {-
 --   in one terminal listen on 1053 as a dns resolver
