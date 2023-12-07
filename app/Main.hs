@@ -20,6 +20,7 @@ import Data.Word (Word16, Word32, Word8)
 import Debug.Trace (traceShow)
 import Network.Socket
 import Network.Socket.ByteString
+import System.Environment
 
 -- import Data.Text.Encoding (decodeUtf8)
 
@@ -268,8 +269,6 @@ resolve domainName recordType nameserver = do
     Left err -> do
       traceShow ("Error parsing DNS packet: " ++ err) (return Nothing)
     Right packet -> do
-      print domainName
-      print packet
       let ip = getAnswer $ dnsPacketAnswers packet
       let nsIp = getNsIp $ dnsPacketAdditionals packet
       let nsDomain = getNs $ dnsPacketAuthorities packet
@@ -291,8 +290,10 @@ resolve domainName recordType nameserver = do
 
 main :: IO ()
 main = do
+  args <- getArgs
   let nameserver = "8.8.8.8"
-  ip <- resolve "www.google.com" typeA nameserver
+  let domain = (args !! 0)
+  ip <- resolve domain typeA nameserver
   print ip
 
 -- byteString <- readByteStringFromFile "output_file.bin"
