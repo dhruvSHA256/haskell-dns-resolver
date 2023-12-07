@@ -14,9 +14,14 @@ import Data.ByteString.Builder
 import qualified Data.ByteString.Char8 as BS
 import Data.ByteString.Conversion (toByteString')
 import qualified Data.ByteString.Lazy as LBS
-import Data.List (intercalate)
+import Data.List as L
+import Data.Maybe (fromMaybe, isJust)
 import Data.Word (Word16, Word32, Word8)
-import Debug.Trace (traceShow, traceShowM)
+import Debug.Trace (traceShow)
+import Network.Socket
+import Network.Socket.ByteString
+
+-- import Data.Text.Encoding (decodeUtf8)
 
 -- dns packet = dns header: 12 bytes fixed
 --            + dns question: variable
@@ -51,7 +56,7 @@ import Debug.Trace (traceShow, traceShowM)
 --           RCODE: 4 bits Response Code
 
 data DNSHeader = DNSHeader
-  { dnsHeaderId :: Data.Word.Word16, --  a 16 bit word or 2 bytes int
+  { dnsHeaderId :: Data.Word.Word16,
     dnsHeaderFlags :: Data.Word.Word16, -- QR OPCODE AA TC RD RA Z RCODE
     -- dnsHeaderFlagQR:: Bool,
     -- dnsHeaderFlagOPCODE:: Word4,
@@ -120,13 +125,13 @@ encodeDNSName domainName = toByteString' $ mconcat encodedParts <> word8 0
     encodePart part = word8 (fromIntegral $ length part) <> stringUtf8 part
 
 -- A record
-typeA :: Int
+typeA :: Data.Word.Word16
 typeA = 1
 
-typeNs :: Int
+typeNs :: Data.Word.Word16
 typeNs = 2
 
-typeTxt :: Int
+typeTxt :: Data.Word.Word16
 typeTxt = 16
 
 classIn :: Data.Word.Word16
@@ -194,7 +199,7 @@ getDNSRecordList input count = do
       data_len <- getInt16be
       data_ <- getRecordData (fromIntegral type') (fromIntegral data_len)
       return $ DNSRecord {dnsRecordName = domain, dnsRecordType = type', dnsRecordClass = class', dnsRecordTtl = ttl, dnsRecordData = data_}
-    getRecordData :: Int -> Int -> Get BS.ByteString
+    getRecordData :: Data.Word.Word16 -> Int -> Get BS.ByteString
     getRecordData type_ data_len
       | type_ == typeNs = getDomainName input
       | type_ == typeA = do
@@ -224,21 +229,76 @@ readByteStringFromFile :: FilePath -> IO BS.ByteString
 readByteStringFromFile filePath = do
   BS.readFile filePath
 
-ipBytes :: BS.ByteString
-ipBytes = B.pack [66, 67]
+getAnswer :: [DNSRecord] -> Maybe String
+getAnswer records = do
+  let matchingRecord = L.find (\x -> dnsRecordType x == typeA) records
+  case matchingRecord of
+    Just x -> Just (BS.unpack $ dnsRecordData x)
+    Nothing -> Nothing
 
-ipList :: [Word8]
-ipList = ipBytesToList ipBytes
+getNsIp :: [DNSRecord] -> Maybe String
+getNsIp records = do
+  let matchingRecord = L.find (\x -> dnsRecordType x == typeA) records
+  case matchingRecord of
+    Just x -> Just (BS.unpack $ dnsRecordData x)
+    Nothing -> Nothing
 
-ipBytesToList :: BS.ByteString -> [Word8]
-ipBytesToList = B.unpack
+getNs :: [DNSRecord] -> Maybe String
+getNs records = do
+  let matchingRecord = L.find (\x -> dnsRecordType x == typeNs) records
+  case matchingRecord of
+    Just x -> Just (BS.unpack $ dnsRecordData x)
+    Nothing -> Nothing
+
+sendUDPRequest :: String -> Int -> BS.ByteString -> IO BS.ByteString
+sendUDPRequest host port message = do
+  sock <- socket AF_INET Datagram defaultProtocol
+  let hints = defaultHints {addrSocketType = Datagram}
+  addr : _ <- getAddrInfo (Just hints) (Just host) (Just $ show port)
+  connect sock $ addrAddress addr
+  void $ sendTo sock message (addrAddress addr)
+  (result, _) <- recvFrom sock 1024
+  return result
+
+resolve :: String -> Data.Word.Word16 -> String -> IO (Maybe String)
+resolve domainName recordType nameserver = do
+  query <- encodeQuery domainName recordType
+  byteString <- sendUDPRequest nameserver 53 query
+  case decodeQuery byteString of
+    Left err -> do
+      traceShow ("Error parsing DNS packet: " ++ err) (return Nothing)
+    Right packet -> do
+      print domainName
+      print packet
+      let ip = getAnswer $ dnsPacketAnswers packet
+      let nsIp = getNsIp $ dnsPacketAdditionals packet
+      let nsDomain = getNs $ dnsPacketAuthorities packet
+      if isJust ip
+        then case ip of
+          Just xx -> return (Just xx)
+          Nothing -> traceShow "Error Occured (ip)" $ return Nothing
+        else
+          if isJust nsIp
+            then case nsIp of
+              Just nsIP -> resolve domainName recordType nsIP
+              Nothing -> traceShow "Error Occured (nsIp)" $ return Nothing
+            else do
+              case nsDomain of
+                Just d -> do
+                  nameserver <- resolve d typeA nameserver
+                  resolve domainName recordType $ fromMaybe "" nameserver
+                Nothing -> traceShow "Error Occured (nsDomain)" $ return Nothing
 
 main :: IO ()
 main = do
-  byteString <- readByteStringFromFile "output_file.bin"
-  case decodeQuery byteString of
-    Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
-    Right domain -> print domain
+  let nameserver = "8.8.8.8"
+  ip <- resolve "www.google.com" typeA nameserver
+  print ip
+
+-- byteString <- readByteStringFromFile "output_file.bin"
+-- case decodeQuery byteString of
+--   Left err -> putStrLn $ "Error parsing DNS packet: " ++ err
+--   Right domain -> print domain
 
 -- Right domain -> print ""
 
