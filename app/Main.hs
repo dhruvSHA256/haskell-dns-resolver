@@ -5,7 +5,7 @@
 
 module Main where
 
-import Control.Monad (void)
+import Control.Monad (void,when)
 import DNS
   ( DNSPacket
       ( dnsPacketAdditionals,
@@ -18,7 +18,7 @@ import DNS
   )
 import qualified Data.ByteString.Char8 as BS
 import Data.List as L (find)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import Data.Word (Word16)
 import Debug.Trace (traceShow)
 import Decode (decodeQuery)
@@ -35,27 +35,21 @@ import Network.Socket
   )
 import Network.Socket.ByteString (recvFrom, sendTo)
 import System.Environment (getArgs)
+import System.Exit (exitFailure)
+
+matchRecordType :: Word16 -> [DNSRecord] -> Maybe String
+matchRecordType recordType records = do
+  let matchingRecord = L.find (\x -> dnsRecordType x == recordType) records
+  (\x -> Just (BS.unpack $ dnsRecordData x)) =<< matchingRecord
 
 getAnswer :: [DNSRecord] -> Maybe String
-getAnswer records = do
-  let matchingRecord = L.find (\x -> dnsRecordType x == typeA) records
-  case matchingRecord of
-    Just x -> Just (BS.unpack $ dnsRecordData x)
-    Nothing -> Nothing
+getAnswer = matchRecordType typeA
 
 getNsIp :: [DNSRecord] -> Maybe String
-getNsIp records = do
-  let matchingRecord = L.find (\x -> dnsRecordType x == typeA) records
-  case matchingRecord of
-    Just x -> Just (BS.unpack $ dnsRecordData x)
-    Nothing -> Nothing
+getNsIp = matchRecordType typeA
 
 getNs :: [DNSRecord] -> Maybe String
-getNs records = do
-  let matchingRecord = L.find (\x -> dnsRecordType x == typeNs) records
-  case matchingRecord of
-    Just x -> Just (BS.unpack $ dnsRecordData x)
-    Nothing -> Nothing
+getNs = matchRecordType typeNs
 
 sendUDPRequest :: String -> Int -> BS.ByteString -> IO BS.ByteString
 sendUDPRequest host port message = do
@@ -75,29 +69,23 @@ resolve domainName recordType nameserver = do
     Left err -> do
       traceShow ("Error parsing DNS packet: " ++ err) (return Nothing)
     Right packet -> do
-      let ip = getAnswer $ dnsPacketAnswers packet
-      let nsIp = getNsIp $ dnsPacketAdditionals packet
-      let nsDomain = getNs $ dnsPacketAuthorities packet
-      if isJust ip
-        then case ip of
-          Just xx -> return (Just xx)
-          Nothing -> traceShow "Error Occured (ip)" $ return Nothing
-        else
-          if isJust nsIp
-            then case nsIp of
-              Just nsIP -> resolve domainName recordType nsIP
-              Nothing -> traceShow "Error Occured (nsIp)" $ return Nothing
-            else do
-              case nsDomain of
-                Just d -> do
-                  nameserver <- resolve d typeA nameserver
-                  resolve domainName recordType $ fromMaybe "" nameserver
-                Nothing -> traceShow "Error Occured (nsDomain)" $ return Nothing
+      let mIp = getAnswer $ dnsPacketAnswers packet
+      let mNsIp = getNsIp $ dnsPacketAdditionals packet
+      let mNsDomain = getNs $ dnsPacketAuthorities packet
+      case (mIp, mNsIp, mNsDomain) of
+        (Just ip, _, _) -> return $ Just ip
+        (_, Just nsIp, _) -> resolve domainName recordType nsIp
+        (_, _, Just nsDomain) -> do
+          nameserver <- resolve nsDomain typeA nameserver
+          resolve domainName recordType $ fromMaybe "" nameserver
+        (_, _, _) -> traceShow "Error Occured" $ return Nothing
 
 main :: IO ()
 main = do
   args <- getArgs
   let nameserver = "8.8.8.8"
+  when (null args) $ 
+    traceShow "Usage cabal haskell-dns-resolver <domain>" exitFailure
   let domain = head args
   ip <- resolve domain typeA nameserver
   print ip

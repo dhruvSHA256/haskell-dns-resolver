@@ -1,0 +1,13 @@
+cradle:
+  cabal:
+    - path: "app/Main.hs"
+      component: "haskell-dns-resolver:exe:haskell-dns-resolver"
+
+    - path: "app/DNS.hs"
+      component: "haskell-dns-resolver:exe:haskell-dns-resolver"
+
+    - path: "app/Encode.hs"
+      component: "haskell-dns-resolver:exe:haskell-dns-resolver"
+
+    - path: "app/Decode.hs"
+      component: "haskell-dns-resolver:exe:haskell-dns-resolver"

@@ -22,9 +22,9 @@ import Data.Word (Word16, Word32)
 
 -- dns record = name: byteString
 --            + type: 2 byte int
---            + class : 2 byte int
---            + ttl : 4 byte int
---            + record : 2 byte int
+--            + class: 2 byte int
+--            + ttl: 4 byte int
+--            + record: 2 byte int
 
 -- dns flag: QR:  1 bit Query Response
 --           OPCODE: 4 bits Operation Code
@@ -36,8 +36,8 @@ import Data.Word (Word16, Word32)
 --           RCODE: 4 bits Response Code
 
 data DNSHeader = DNSHeader
-  { dnsHeaderId :: Data.Word.Word16,
-    dnsHeaderFlags :: Data.Word.Word16, -- QR OPCODE AA TC RD RA Z RCODE
+  { dnsHeaderId :: !Data.Word.Word16,
+    dnsHeaderFlags :: !Data.Word.Word16, -- QR OPCODE AA TC RD RA Z RCODE
     -- dnsHeaderFlagQR:: Bool,
     -- dnsHeaderFlagOPCODE:: Word4,
     -- dnsHeaderFlagAA:: Bool,
@@ -46,40 +46,39 @@ data DNSHeader = DNSHeader
     -- dnsHeaderFlagRA:: Bool,
     -- dnsHeaderFlagZ:: Word4, -- 3 bit
     -- dnsHeaderFlagRCODE:: Word4,
-    dnsHeaderNumQuestion :: Data.Word.Word16,
-    dnsHeaderNumAnswer :: Data.Word.Word16,
-    dnsHeaderNumAuthority :: Data.Word.Word16,
-    dnsHeaderNumAdditional :: Data.Word.Word16
+    dnsHeaderNumQuestion :: !Data.Word.Word16,
+    dnsHeaderNumAnswer :: !Data.Word.Word16,
+    dnsHeaderNumAuthority :: !Data.Word.Word16,
+    dnsHeaderNumAdditional :: !Data.Word.Word16
   }
   deriving (Show)
 
 data DNSQuestion = DNSQuestion
-  { dnsQuestionName :: BS.ByteString,
-    dnsQuestionType :: Data.Word.Word16,
-    dnsQuestionClass :: Data.Word.Word16
+  { dnsQuestionName :: !BS.ByteString,
+    dnsQuestionType :: !Data.Word.Word16,
+    dnsQuestionClass :: !Data.Word.Word16
   }
   deriving (Show)
 
 data DNSRecord = DNSRecord
-  { dnsRecordName :: BS.ByteString,
-    dnsRecordType :: Data.Word.Word16,
-    dnsRecordClass :: Data.Word.Word16,
-    dnsRecordTtl :: Data.Word.Word32,
-    dnsRecordData :: BS.ByteString
+  { dnsRecordName :: !BS.ByteString,
+    dnsRecordType :: !Data.Word.Word16,
+    dnsRecordClass :: !Data.Word.Word16,
+    dnsRecordTtl :: !Data.Word.Word32,
+    dnsRecordData :: !BS.ByteString
   }
   deriving (Show)
 
 data DNSPacket = DNSPacket
-  { dnsPacketHeader :: DNSHeader,
-    dnsPacketQuestions :: [DNSQuestion],
-    dnsPacketAnswers :: [DNSRecord],
-    dnsPacketAuthorities :: [DNSRecord],
-    dnsPacketAdditionals :: [DNSRecord]
+  { dnsPacketHeader :: !DNSHeader,
+    dnsPacketQuestions :: ![DNSQuestion],
+    dnsPacketAnswers :: ![DNSRecord],
+    dnsPacketAuthorities :: ![DNSRecord],
+    dnsPacketAdditionals :: ![DNSRecord]
   }
   deriving (Show)
 
 -----------------------------------------------------
--- A record
 typeA :: Data.Word.Word16
 typeA = 1
 
