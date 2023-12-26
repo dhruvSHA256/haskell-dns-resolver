@@ -22,9 +22,9 @@ import Data.Word (Word16, Word32)
 
 -- dns record = name: byteString
 --            + type: 2 byte int
---            + class : 2 byte int
---            + ttl : 4 byte int
---            + record : 2 byte int
+--            + class: 2 byte int
+--            + ttl: 4 byte int
+--            + record: 2 byte int
 
 -- dns flag: QR:  1 bit Query Response
 --           OPCODE: 4 bits Operation Code
@@ -79,7 +79,6 @@ data DNSPacket = DNSPacket
   deriving (Show)
 
 -----------------------------------------------------
--- A record
 typeA :: Data.Word.Word16
 typeA = 1
 
